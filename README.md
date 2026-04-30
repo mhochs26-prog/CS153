@@ -11,8 +11,9 @@ Currently able to directly edit Google Calendar/check for time conflicts with gi
 
 ## Run
 IMPORTANT: needs GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in .env file, which is not in github so cloned project will not work with google auth
-npm install
-npm run dev
+
+- npm install
+- npm run dev
 
 
 Then open:
