@@ -50,3 +50,4 @@ Example event values:
 - Tokens are stored locally in `data/tokens.json` for simplicity.
 - This is a starter; for production, you’ll want encryption + a real DB + secure hosting for the OAuth callback.
 
+<img width="936" height="841" alt="image" src="https://github.com/user-attachments/assets/85e281c7-a0dd-41c5-af04-2f5aad3c360d" />
