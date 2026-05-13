@@ -1,0 +1,22 @@
+# Free web service on Render: https://render.com
+# After first deploy, open the service → Environment and set the variables marked sync:false.
+# In Google Cloud Console, add the production redirect URI, e.g.:
+#   https://<your-service-name>.onrender.com/oauth2/callback
+
+services:
+  - type: web
+    name: calendar-planner
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        sync: false
