@@ -12,12 +12,21 @@ const { hasConflict, createEvent } = require("./calendar");
 const { wallTimeToISO } = require("./wallTime");
 const { extractGoogleApiMessage } = require("./googleErrors");
 
+function sessionCookieOptions() {
+  const isProd = process.env.NODE_ENV === "production";
+  return {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: isProd,
+    path: "/",
+  };
+}
+
 function ensureBrowserUserId(req, res) {
   const existing = req.cookies?.uid;
   if (typeof existing === "string" && existing.length > 10) return existing;
   const uid = crypto.randomBytes(16).toString("hex");
-  // Local dev cookie. In production: secure=true, sameSite=strict, etc.
-  res.cookie("uid", uid, { httpOnly: true, sameSite: "lax" });
+  res.cookie("uid", uid, sessionCookieOptions());
   return uid;
 }
 
@@ -174,6 +183,9 @@ async function main() {
 
   const oauth2Client = makeOAuth2Client(env);
   const app = express();
+  if (process.env.NODE_ENV === "production") {
+    app.set("trust proxy", 1);
+  }
   app.use(cookieParser());
   app.use(express.urlencoded({ extended: false }));
 
@@ -231,6 +243,7 @@ async function main() {
   app.post("/disconnect", (req, res) => {
     const uid = ensureBrowserUserId(req, res);
     clearUserTokens(uid);
+    res.clearCookie("uid", sessionCookieOptions());
     res.redirect("/?msg=Disconnected");
   });
 
@@ -316,7 +329,9 @@ async function main() {
 
   app.listen(env.PORT, () => {
     // eslint-disable-next-line no-console
-    console.log(`Web UI running at http://localhost:${env.PORT}`);
+    const where =
+      process.env.NODE_ENV === "production" ? `port ${env.PORT}` : `http://localhost:${env.PORT}`;
+    console.log(`Web UI running at ${where}`);
   });
 }
 
