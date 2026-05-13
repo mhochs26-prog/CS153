@@ -8,6 +8,8 @@ This project is a starter web app that:
 
 ## In Progress
 Currently able to directly edit Google Calendar/check for time conflicts with given times. Working on adding AI agent which can interpret text and directly plan in calendar.
+## Visit Here:
+https://cs153.onrender.com
 
 ## Run
 IMPORTANT: needs GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in .env file, which is not in github so cloned project will not work with google auth
