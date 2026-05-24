@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96" role="img" aria-labelledby="title">
+  <title id="title">Assistant</title>
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#7aa7ff"/>
+      <stop offset="100%" stop-color="#4b6bfb"/>
+    </linearGradient>
+  </defs>
+  <circle cx="48" cy="48" r="44" fill="url(#g)" stroke="rgba(255,255,255,.25)" stroke-width="2"/>
+  <ellipse cx="36" cy="42" rx="6" ry="8" fill="#0f1628"/>
+  <ellipse cx="60" cy="42" rx="6" ry="8" fill="#0f1628"/>
+  <path d="M32 62 Q48 73 64 62" stroke="#0f1628" stroke-width="4" stroke-linecap="round" fill="none"/>
+  <ellipse cx="48" cy="28" rx="12" ry="8" fill="rgba(255,255,255,.25)"/>
+</svg>
