@@ -9,10 +9,6 @@ This project is a web app that:
 ## Visit Here:
 https://cs153.onrender.com
 
-test with  
-cs153testagent@gmail.com  
-Thisisforcs153!
-
 ## Local Run
 IMPORTANT: cloned project will not work, no .env
 
