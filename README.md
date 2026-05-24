@@ -3,16 +3,14 @@
 This project is a starter web app that:
 
 - lets a browser user connect Google Calendar via OAuth
-- stores OAuth tokens locally (in `data/tokens.json`, keyed by a browser cookie)
-- creates a Google Calendar event with basic conflict checking (Google FreeBusy)
+- user prompts agent to plan/break down events into segments
+- creates a Google Calendar event with conflict checking
 
-## In Progress
-Currently able to directly edit Google Calendar/check for time conflicts with given times. Working on adding AI agent which can interpret text and directly plan in calendar.
 ## Visit Here:
 https://cs153.onrender.com
 
 ## Run
-IMPORTANT: needs GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in .env file, which is not in github so cloned project will not work with google auth
+IMPORTANT: cloned project will not work, no .env
 
 - npm install
 - npm run dev
@@ -22,12 +20,10 @@ Then open:
 
 - http://localhost:8787
 
-Example event values:
-
-- title: `Homework`
-- start date: `2026-04-24`, time `3:00 PM`
-- end date: `2026-04-24`, time `4:00 PM`
-- time zone: `America/Los_Angeles`
+Example request:
+I want to work on homework tomorrow afternoon
+I want to build a website in the morning
 
 
-<img width="936" height="841" alt="image" src="https://github.com/user-attachments/assets/85e281c7-a0dd-41c5-af04-2f5aad3c360d" />
+<img width="697" height="1013" alt="image" src="https://github.com/user-attachments/assets/577029fe-210c-44f2-8b48-41d523552743" />
+
