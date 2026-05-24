@@ -1,16 +1,34 @@
 require("dotenv").config();
 
 const express = require("express");
-const cookieParser = require("cookie-parser");
+const path = require("path");
 const crypto = require("crypto");
+const cookieParser = require("cookie-parser");
+
+const { google } = require("googleapis");
 
 const { loadEnv } = require("./config");
-const { google } = require("googleapis");
 const { makeOAuth2Client } = require("./googleAuth");
 const { getUserTokens, setUserTokens, clearUserTokens } = require("./tokenStore");
-const { hasConflict, createEvent } = require("./calendar");
-const { wallTimeToISO } = require("./wallTime");
+const { createEvent } = require("./calendar");
 const { extractGoogleApiMessage } = require("./googleErrors");
+const { runPlanningPipeline, formatPreviewRow } = require("./plannerRun");
+
+const {
+  CHAT_COOKIE,
+  signChatState,
+  parseChatState,
+  mergeUser,
+  mergeAssistant,
+  shrinkForCookie,
+} = require("./chatState");
+
+const { renderChatPage, escapeHtml } = require("./views/chatViews");
+const { pendingPlanItemSchema } = require("./planSchema");
+const { z } = require("zod");
+
+const WELCOME =
+  "Hi — describe what outcome you’re aiming for plus when you tend to have focus blocks (mornings / weeknights / weekends).\nAfter you connect Google below, Send runs a planner: openings come from Calendar, drafts use Gemini — you Confirm before anything is written.";
 
 function sessionCookieOptions() {
   const isProd = process.env.NODE_ENV === "production";
@@ -22,6 +40,13 @@ function sessionCookieOptions() {
   };
 }
 
+function chatCookieOpts() {
+  return {
+    ...sessionCookieOptions(),
+    maxAge: 1000 * 60 * 60 * 72,
+  };
+}
+
 function ensureBrowserUserId(req, res) {
   const existing = req.cookies?.uid;
   if (typeof existing === "string" && existing.length > 10) return existing;
@@ -30,171 +55,28 @@ function ensureBrowserUserId(req, res) {
   return uid;
 }
 
-function hour12Options() {
-  let html = "";
-  for (let h = 1; h <= 12; h += 1) {
-    html += `<option value="${h}">${h}</option>`;
-  }
-  return html;
-}
-
-function minuteOptions() {
-  let html = "";
-  for (let m = 0; m <= 59; m += 1) {
-    const label = String(m).padStart(2, "0");
-    html += `<option value="${m}">${label}</option>`;
-  }
-  return html;
-}
-
-function renderPage({ connected, connectedEmail, connectUrl, message, error }) {
-  const statusLine = connected
-    ? `<div class="pill ok">Connected</div>`
-    : `<div class="pill warn">Not connected</div>`;
-
-  const banner = error
-    ? `<div class="banner err">${escapeHtml(error)}</div>`
-    : message
-      ? `<div class="banner ok">${escapeHtml(message)}</div>`
-      : "";
-
-  const connectSection = connected
-    ? `<p class="muted">Connected as <strong>${escapeHtml(connectedEmail || "Unknown account")}</strong>.</p>
-       <form method="POST" action="/disconnect" style="margin-top: 10px;">
-         <button type="submit" style="background: var(--warn); color: #2b1b00;">Disconnect</button>
-       </form>`
-    : `<a class="btn" href="${connectUrl}">Connect Google Calendar</a>
-       <p class="muted">You’ll be sent to Google to log in and authorize access.</p>`;
-
-  const formDisabled = connected ? "" : "disabled";
-  const formHint = connected ? "" : `<p class="muted">Connect first to enable event creation.</p>`;
-
-  return `<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Calendar Planner</title>
-    <style>
-      :root { --bg:#0b0f19; --card:#111a2e; --text:#e9eefc; --muted:#a8b3d6; --ok:#2bd576; --warn:#ffcc66; --err:#ff5c7a; --btn:#5b8cff; }
-      body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background: radial-gradient(1000px 600px at 20% 0%, #142347, var(--bg)); color: var(--text); }
-      .wrap { max-width: 820px; margin: 0 auto; padding: 28px 16px 48px; }
-      .card { background: color-mix(in oklab, var(--card), black 18%); border: 1px solid rgba(255,255,255,.08); border-radius: 16px; padding: 18px; box-shadow: 0 10px 30px rgba(0,0,0,.35); }
-      .row { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
-      h1 { font-size: 20px; margin: 0; letter-spacing: .2px; }
-      .pill { padding: 6px 10px; border-radius: 999px; font-size: 12px; border:1px solid rgba(255,255,255,.12); }
-      .pill.ok { background: rgba(43,213,118,.12); color: var(--ok); }
-      .pill.warn { background: rgba(255,204,102,.12); color: var(--warn); }
-      .muted { color: var(--muted); margin: 10px 0 0; }
-      .banner { margin: 14px 0 0; padding: 10px 12px; border-radius: 12px; border:1px solid rgba(255,255,255,.12); }
-      .banner.ok { background: rgba(43,213,118,.10); }
-      .banner.err { background: rgba(255,92,122,.12); }
-      .btn { display:inline-block; margin-top: 12px; background: var(--btn); color: white; text-decoration:none; padding: 10px 14px; border-radius: 12px; font-weight: 650; }
-      .grid { display:grid; grid-template-columns: 1fr 1fr; gap:12px; margin-top: 14px; }
-      @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } }
-      label { display:block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
-      input, textarea, select { width:100%; box-sizing:border-box; padding: 10px 12px; border-radius: 12px; border: 1px solid rgba(255,255,255,.14); background: rgba(0,0,0,.22); color: var(--text); }
-      textarea { min-height: 84px; resize: vertical; }
-      .datetime-block { margin-top: 12px; }
-      .datetime-block > label { margin-bottom: 8px; }
-      .time-row { display:flex; gap:10px; align-items:stretch; flex-wrap:wrap; }
-      .time-row select { flex: 1; min-width: 72px; }
-      input[type="date"] { min-height: 44px; }
-      button { margin-top: 12px; padding: 10px 14px; border-radius: 12px; border: 0; background: var(--ok); color: #062414; font-weight: 750; cursor:pointer; }
-      button[disabled] { opacity: .45; cursor: not-allowed; }
-      code { background: rgba(255,255,255,.08); padding: 2px 6px; border-radius: 8px; }
-    </style>
-  </head>
-  <body>
-    <div class="wrap">
-      <div class="card">
-        <div class="row">
-          <h1>Calendar Planner (starter)</h1>
-          ${statusLine}
-        </div>
-        ${banner}
-        <div style="margin-top: 10px;">
-          ${connectSection}
-        </div>
-        <hr style="margin:18px 0; border:0; border-top:1px solid rgba(255,255,255,.10)" />
-        <h2 style="margin:0; font-size:14px; color: var(--muted); font-weight:700; letter-spacing:.3px;">Create an event</h2>
-        ${formHint}
-        <form method="POST" action="/events">
-          <div class="grid">
-            <div>
-              <label>Title</label>
-              <input name="title" placeholder="Homework" required ${formDisabled}/>
-            </div>
-            <div>
-              <label>Time zone (IANA)</label>
-              <input name="timezone" placeholder="America/Los_Angeles" value="America/Los_Angeles" ${formDisabled}/>
-            </div>
-          </div>
-          <div class="datetime-block">
-            <label>Start</label>
-            <input type="date" name="start_date" required ${formDisabled}/>
-            <div class="time-row" style="margin-top:8px;">
-              <select name="start_hour" aria-label="Start hour" required ${formDisabled}>${hour12Options()}</select>
-              <select name="start_minute" aria-label="Start minute" required ${formDisabled}>${minuteOptions()}</select>
-              <select name="start_ampm" aria-label="Start AM or PM" required ${formDisabled}>
-                <option value="AM">AM</option>
-                <option value="PM">PM</option>
-              </select>
-            </div>
-          </div>
-          <div class="datetime-block">
-            <label>End</label>
-            <input type="date" name="end_date" required ${formDisabled}/>
-            <div class="time-row" style="margin-top:8px;">
-              <select name="end_hour" aria-label="End hour" required ${formDisabled}>${hour12Options()}</select>
-              <select name="end_minute" aria-label="End minute" required ${formDisabled}>${minuteOptions()}</select>
-              <select name="end_ampm" aria-label="End AM or PM" required ${formDisabled}>
-                <option value="AM">AM</option>
-                <option value="PM">PM</option>
-              </select>
-            </div>
-          </div>
-          <div style="margin-top: 12px;">
-            <label>Description</label>
-            <textarea name="description" placeholder="Optional notes..." ${formDisabled}></textarea>
-          </div>
-          <button type="submit" ${formDisabled}>Create event (conflict-checked)</button>
-        </form>
-        <p class="muted" style="margin-top: 14px;">
-          Pick a date from the calendar, then choose hour, minutes, and AM/PM. Times use the time zone above.
-        </p>
-      </div>
-    </div>
-  </body>
-</html>`;
-}
-
-function escapeHtml(s) {
-  return String(s)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
+function writeChatCookie(res, secret, state) {
+  const slim = shrinkForCookie(secret, state);
+  res.cookie(CHAT_COOKIE, signChatState(secret, slim), chatCookieOpts());
 }
 
 async function main() {
   const env = loadEnv();
-
   const oauth2Client = makeOAuth2Client(env);
+  const chatSecret = env.CHAT_STATE_SECRET;
+
   const app = express();
+
   if (process.env.NODE_ENV === "production") {
     app.set("trust proxy", 1);
   }
+
+  app.use(express.static(path.join(process.cwd(), "public")));
   app.use(cookieParser());
   app.use(express.urlencoded({ extended: false }));
 
-  app.get("/", (req, res) => {
-    const uid = ensureBrowserUserId(req, res);
-    const record = getUserTokens(uid);
-    const tokens = record?.tokens ?? record; // backwards compatible with earlier tokens-only storage
-    const connectedEmail = record?.email;
-    const connectUrl = oauth2Client.generateAuthUrl({
+  function oauthConnectUrl(uid) {
+    return oauth2Client.generateAuthUrl({
       access_type: "offline",
       prompt: "consent select_account",
       scope: [
@@ -205,15 +87,57 @@ async function main() {
       ],
       state: uid,
     });
-    res.status(200).send(
-      renderPage({
-        connected: Boolean(tokens),
-        connectedEmail,
-        connectUrl,
-        message: req.query.msg,
-        error: req.query.err,
-      })
-    );
+  }
+
+  function bannerFromQuery(query) {
+    const msg =
+      typeof query.msg === "string" && query.msg.trim() ?
+        `<div class="banner ok">${escapeHtml(query.msg.trim())}</div>`
+      : "";
+    const err =
+      typeof query.err === "string" && query.err.trim() ?
+        `<div class="banner err">${escapeHtml(query.err.trim())}</div>`
+      : "";
+    return msg || err || "";
+  }
+
+  function previewRowsFromPending(plan) {
+    if (!plan?.items?.length) return null;
+    const rows = [];
+    for (const it of plan.items) {
+      const p = pendingPlanItemSchema.safeParse(it);
+      if (p.success) rows.push(formatPreviewRow(p.data));
+    }
+    return rows.length ? rows : null;
+  }
+
+  function sendPlannerPage(req, res, bannerExtra = "") {
+    const uid = ensureBrowserUserId(req, res);
+    const state = parseChatState(chatSecret, req.cookies[CHAT_COOKIE] ?? "");
+
+    const record = getUserTokens(uid);
+    const tokens = record?.tokens ?? record;
+    const connected = Boolean(tokens);
+
+    let banner = bannerFromQuery(req.query);
+    if (bannerExtra) banner = bannerExtra + banner;
+
+    const html = renderChatPage({
+      connected,
+      connectedEmail: record?.email,
+      connectUrl: oauthConnectUrl(uid),
+      banner,
+      messages: state.messages,
+      previewRows: previewRowsFromPending(state.pendingPlan ?? null),
+      defaultTimeZoneLabel: env.DEFAULT_TIME_ZONE,
+      formDisabledReason: connected ? undefined : "",
+      initialWelcome: WELCOME,
+    });
+    res.status(200).send(html);
+  }
+
+  app.get("/", (req, res) => {
+    sendPlannerPage(req, res);
   });
 
   app.get("/oauth2/callback", async (req, res) => {
@@ -226,7 +150,6 @@ async function main() {
 
       const { tokens } = await oauth2Client.getToken(code);
 
-      // Fetch the connected Google account email (so we can display it).
       const authForUserinfo = makeOAuth2Client(env);
       authForUserinfo.setCredentials(tokens);
       const oauth2 = google.oauth2({ version: "v2", auth: authForUserinfo });
@@ -244,91 +167,163 @@ async function main() {
     const uid = ensureBrowserUserId(req, res);
     clearUserTokens(uid);
     res.clearCookie("uid", sessionCookieOptions());
+    res.clearCookie(CHAT_COOKIE, chatCookieOpts());
     res.redirect("/?msg=Disconnected");
   });
 
-  app.post("/events", async (req, res) => {
-    const uid = ensureBrowserUserId(req, res);
+  app.post("/plan", async (req, res) => {
+    ensureBrowserUserId(req, res);
+    const uid = req.cookies?.uid ?? "";
     const record = getUserTokens(uid);
     const tokens = record?.tokens ?? record;
-    if (!tokens) return res.redirect("/?err=Not%20connected%20yet");
 
-    const title = req.body.title;
-    const timeZone = req.body.timezone || "America/Los_Angeles";
-    const description = req.body.description || undefined;
-
-    if (typeof title !== "string") {
-      return res.redirect("/?err=Missing%20fields");
+    /** @type {string} */
+    const rawMsg = typeof req.body.message === "string" ? req.body.message.trim() : "";
+    if (!rawMsg) {
+      return res.redirect("/?err=" + encodeURIComponent("Type a brief plan prompt first."));
     }
 
-    const startRes = wallTimeToISO(
-      {
-        date: req.body.start_date,
-        hour12: req.body.start_hour,
-        minute: req.body.start_minute,
-        ampm: req.body.start_ampm,
-      },
-      timeZone
-    );
-    const endRes = wallTimeToISO(
-      {
-        date: req.body.end_date,
-        hour12: req.body.end_hour,
-        minute: req.body.end_minute,
-        ampm: req.body.end_ampm,
-      },
-      timeZone
-    );
+    let basis = parseChatState(chatSecret, req.cookies[CHAT_COOKIE] ?? "");
+    const withUser = mergeUser(chatSecret, basis, rawMsg);
 
-    if (!startRes.ok) {
-      return res.redirect(`/?err=${encodeURIComponent(startRes.error)}`);
-    }
-    if (!endRes.ok) {
-      return res.redirect(`/?err=${encodeURIComponent(endRes.error)}`);
+    if (!tokens) {
+      const nextState = mergeAssistant(
+        chatSecret,
+        withUser,
+        "Connect Google Calendar above, then send your message again so I can read openings.",
+        null
+      );
+      writeChatCookie(res, chatSecret, nextState);
+      return res.redirect("/");
     }
 
-    const startISO = startRes.iso;
-    const endISO = endRes.iso;
-
-    const userOauth = makeOAuth2Client(env);
-    userOauth.setCredentials(tokens);
-    userOauth.on("tokens", (newTokens) => {
-      const mergedTokens = { ...tokens, ...newTokens };
-      const next =
-        record && typeof record === "object" && record.email
-          ? { tokens: mergedTokens, email: record.email }
-          : mergedTokens;
-      setUserTokens(uid, next);
+    const userOAuth = makeOAuth2Client(env);
+    userOAuth.setCredentials(tokens);
+    userOAuth.on("tokens", (newTok) => {
+      const merged = { ...tokens, ...newTok };
+      const prev = getUserTokens(uid);
+      const mergedRecord =
+        prev && typeof prev === "object" && prev.email ? { tokens: merged, email: prev.email } : merged;
+      setUserTokens(uid, mergedRecord);
     });
 
-    try {
-      if (Date.parse(endISO) <= Date.parse(startISO)) {
-        return res.redirect("/?err=End%20time%20must%20be%20after%20start%20time");
-      }
-      const conflict = await hasConflict(userOauth, { startISO, endISO, timeZone });
-      if (conflict) return res.redirect("/?err=Conflict%20detected%20for%20that%20time");
+    const outcome = await runPlanningPipeline(userOAuth, env, rawMsg);
 
-      await createEvent(userOauth, {
-        summary: title,
-        description,
-        startISO,
-        endISO,
-        timeZone,
-      });
-      return res.redirect("/?msg=Event%20created");
-    } catch (e) {
-      // eslint-disable-next-line no-console
-      console.error("Calendar operation failed:", e?.response?.data ?? e);
-      const detail = extractGoogleApiMessage(e);
-      const msg = detail
-        ? `Calendar error: ${detail}`.slice(0, 500)
-        : "Failed to create event.";
-      return res.redirect(`/?err=${encodeURIComponent(msg)}`);
+    if (!outcome.ok) {
+      const txt = outcome.assistantText || "Planner could not draft a schedule.";
+      const nextState = mergeAssistant(chatSecret, withUser, txt, null);
+      writeChatCookie(res, chatSecret, nextState);
+      return res.redirect("/");
     }
+
+    const assistantText = outcome.assistantText || "";
+    /** @type {object[]} */
+    const itemsValidated = [];
+    if (Array.isArray(outcome.items)) {
+      for (const item of outcome.items) {
+        const p = pendingPlanItemSchema.safeParse(item);
+        if (p.success) itemsValidated.push(p.data);
+      }
+    }
+
+    const msgText =
+      assistantText.trim() || "Draft schedule is ready below — tap Confirm once it looks accurate.";
+
+    const nextState = mergeAssistant(chatSecret, withUser, msgText, { items: itemsValidated });
+    writeChatCookie(res, chatSecret, nextState);
+    return res.redirect("/");
+  });
+
+  app.post("/plan/discard", (req, res) => {
+    ensureBrowserUserId(req, res);
+    const basis = parseChatState(chatSecret, req.cookies[CHAT_COOKIE] ?? "");
+    const cleared = shrinkForCookie(chatSecret, {
+      messages: basis.messages,
+      pendingPlan: null,
+    });
+    writeChatCookie(res, chatSecret, cleared);
+    res.redirect("/?msg=Draft%20cleared.");
+  });
+
+  app.post("/plan/confirm", async (req, res) => {
+    ensureBrowserUserId(req, res);
+    const uid =
+      typeof req.cookies.uid === "string" && req.cookies.uid.length > 10 ?
+        req.cookies.uid
+      : "";
+    const record = uid ? getUserTokens(uid) : null;
+    const tokens = record?.tokens ?? record;
+    const basis = parseChatState(chatSecret, req.cookies[CHAT_COOKIE] ?? "");
+
+    if (!basis.pendingPlan?.items?.length || !tokens) {
+      res.redirect("/?err=" + encodeURIComponent("Nothing to confirm or reconnect Google."));
+      return;
+    }
+
+    const itemsParsed = z.array(pendingPlanItemSchema).safeParse(basis.pendingPlan.items);
+    if (!itemsParsed.success || !itemsParsed.data.length) {
+      res.redirect("/?err=" + encodeURIComponent("Stale draft — run another plan request."));
+      return;
+    }
+    const validated = itemsParsed.data;
+
+    let created = 0;
+    /** @type {string | undefined} */
+    let firstErrMsg;
+
+    const userOAuth = makeOAuth2Client(env);
+    userOAuth.setCredentials(tokens);
+    userOAuth.on("tokens", (newTok) => {
+      const merged = { ...(tokens ?? {}), ...newTok };
+      const prevRec = uid ? getUserTokens(uid) : null;
+      const mergedRecord =
+        prevRec && typeof prevRec === "object" && prevRec.email ?
+          { tokens: merged, email: prevRec.email }
+        : merged;
+      if (uid) setUserTokens(uid, mergedRecord);
+    });
+
+    for (let i = 0; i < validated.length && !firstErrMsg; i += 1) {
+      const item = validated[i];
+
+      try {
+        // eslint-disable-next-line no-await-in-loop -- serial writes throttle Google API bursts
+        await createEvent(userOAuth, {
+          summary: item.title,
+          description: item.description,
+          startISO: item.startISO,
+          endISO: item.endISO,
+          timeZone: item.timeZone,
+        });
+        created += 1;
+      } catch (e) {
+        firstErrMsg = extractGoogleApiMessage(e)
+          ?? (/** @type {Error | undefined} */ (e)?.message ?? "Unexpected calendar error.")
+          ;
+
+        firstErrMsg = String(firstErrMsg).slice(0, 520);
+      }
+    }
+
+    if (firstErrMsg) {
+      res.redirect("/?err=" + encodeURIComponent(`Created ${created} event(s); then: ${firstErrMsg}`));
+      return;
+    }
+
+    const recap = `Logged ${created} block(s) to your calendar.`;
+
+    const nextState = shrinkForCookie(chatSecret, {
+      messages: [
+        ...basis.messages,
+        { role: "assistant" /** @type {const} */, text: recap },
+      ].slice(-14),
+      pendingPlan: null,
+    });
+    writeChatCookie(res, chatSecret, nextState);
+    res.redirect("/?msg=" + encodeURIComponent(recap));
   });
 
   app.listen(env.PORT, () => {
-    // eslint-disable-next-line no-console
     const where =
       process.env.NODE_ENV === "production" ? `port ${env.PORT}` : `http://localhost:${env.PORT}`;
     console.log(`Web UI running at ${where}`);
@@ -336,8 +331,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  // eslint-disable-next-line no-console
   console.error(err);
   process.exit(1);
 });
-
