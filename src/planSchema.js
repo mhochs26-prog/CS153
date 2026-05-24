@@ -1,6 +1,7 @@
 const { z } = require("zod");
 
 const dowEnum = z.enum(["sun", "mon", "tue", "wed", "thu", "fri", "sat"]);
+const timeOfDayEnum = z.enum(["morning", "afternoon", "evening", "anytime"]);
 
 const llmTasksResponseSchema = z.object({
   tasks: z.array(
@@ -15,6 +16,13 @@ const llmTasksResponseSchema = z.object({
         (v) => (v === null || v === undefined || v === "" ? undefined : String(v).toLowerCase()),
         dowEnum.optional()
       ),
+      preferredTimeOfDay: z.preprocess(
+        (v) =>
+          v === null || v === undefined || String(v ?? "").trim() === ""
+            ? "anytime"
+            : String(v).toLowerCase().trim(),
+        timeOfDayEnum
+      ),
     })
   ),
 });
@@ -28,4 +36,4 @@ const pendingPlanItemSchema = z.object({
   timeZone: z.string().min(1),
 });
 
-module.exports = { llmTasksResponseSchema, pendingPlanItemSchema };
+module.exports = { llmTasksResponseSchema, pendingPlanItemSchema, timeOfDayEnum };

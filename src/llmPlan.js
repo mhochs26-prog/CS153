@@ -12,6 +12,11 @@ const taskItemSchemaGemini = {
       enum: ["sun", "mon", "tue", "wed", "thu", "fri", "sat"],
       nullable: true,
     },
+    preferredTimeOfDay: {
+      type: SchemaType.STRING,
+      enum: ["morning", "afternoon", "evening", "anytime"],
+      nullable: true,
+    },
   },
   required: ["title", "durationMinutes"],
 };
@@ -123,9 +128,16 @@ async function proposeTasks(geminiCfg, payload) {
     .join("\n");
 
   const prompt =
-    `You are a scheduling assistant. Break the user's work into discrete tasks with durations in minutes (` +
-    `15–480 minutes each). Prefer 30–180 minute sessions for deep work unless the text suggests shorter blocks. ` +
-    `Return at most 12 tasks. Do NOT choose calendar start/end times; the server assigns available slots.` +
+    `You are a scheduling assistant. Break the user's goals into discrete tasks with durations (15–480 minutes each).\n\n` +
+    `**Realistic durations (important):**\n` +
+    `- Ordinary homework/readings/problem sets/exercises tend to split into shorter passes: bias toward roughly **35–55 minutes each** (~40–65 if they mention one longer sitting). Steer clear of proposing several back-to-back **120-minute homework-style** rows unless they explicitly schedule a cram block or exams.\n` +
+    `- If the user gives one big ambiguous assignment, use **multiple smaller contiguous steps** instead of inflated 2-hour defaults.\n` +
+    `- For deep-building work (focused building/writing labs) modestly longer **60–90** is fine sparingly.` +
+    `\nReturn at most 12 tasks. Do NOT output calendar clocks; the server places blocks into gaps.` +
+    `\n\n**preferredTimeOfDay** tags are **hints for where they'd like sessions to BEGIN** locally—NOT strict end caps:\n` +
+    `- Morning / afternoon / evening ≈ fuzzy start bias (the schedule can spill much later past that label on the SAME continuous open gap).\n` +
+    `- Use "morning"/"afternoon"/"evening"/"anytime" per task whenever the wording suggests it.` +
+    `\nUse preferredDayOfWeek only when weekdays are named or strongly implied.` +
     `\nScheduling context:\n` +
     `- Primary IANA timezone: ${timezone}\n` +
     `- Planning window: roughly the next ${horizonDays} day(s), starting tomorrow (local).\n` +

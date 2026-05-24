@@ -122,6 +122,16 @@ function renderChatPage(opts) {
       .avatar{width:44px;height:44px;border-radius:50%;flex-shrink:0;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);}
       .bubble{max-width:min(560px,calc(100% - 60px));padding:10px 12px;border-radius:14px;border:1px solid rgba(255,255,255,.1);background:rgba(0,0,0,.18);font-size:14px;line-height:1.45;word-break:break-word;}
       .assistant-bubble{border-bottom-left-radius:4px;}
+      .thinking-row .thinking-bubble{color:var(--muted);border-style:dashed;}
+      .thinking-line{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px;}
+      .thinking-dots{display:inline-flex;gap:3px;margin-left:1px;}
+      .thinking-dots span{font-weight:900;animation:thinking-dot 1.15s infinite ease-in-out;}
+      .thinking-dots span:nth-child(2){animation-delay:.18s;}
+      .thinking-dots span:nth-child(3){animation-delay:.36s;}
+      @keyframes thinking-dot{0%,70%,100%{opacity:.2;transform:translateY(0)}35%{opacity:1;transform:translateY(-2px)}}
+      .composer.is-busy textarea,.composer.is-busy button[type="submit"]{opacity:.55;cursor:wait;}
+      .composer.is-busy textarea{pointer-events:none;}
+      .composer.is-busy button[type="submit"]{pointer-events:none;}
       .preview-card{margin-left:54px;background:rgba(0,0,0,.2);padding:12px;border-radius:12px;border:1px solid rgba(255,255,255,.08);}
       @media(max-width:640px){.preview-card{margin-left:0}}
       .preview-h{margin:0 0 10px;font-size:13px;color:var(--muted);letter-spacing:.2px;}
@@ -146,11 +156,11 @@ function renderChatPage(opts) {
         ${banner}
         <div style="margin-top:10px">${connectSection}</div>
       </div>
-      <section class="chat-shell" aria-label="Chat planner">
+      <section class="chat-shell" aria-label="Chat planner" id="chat-shell">
         <div class="thread" id="thread">${threadHtml}</div>
-        <div class="composer">
+        <div class="composer" id="composer">
           ${hint}
-          <form method="POST" action="/plan">
+          <form id="plan-form" method="POST" action="/plan">
             <label for="prompt" style="clip: rect(0 0 0 0); clip-path:inset(50%);position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden">Describe project and availability</label>
             <textarea id="prompt" name="message" placeholder="${escapeHtml(
               `Say what you're working toward and roughly when you're free (time zone defaults to ${defaultTimeZoneLabel}).`
@@ -167,17 +177,69 @@ function renderChatPage(opts) {
     </div>
     <script>
       (function () {
+        var planForm = document.getElementById("plan-form");
         var ta = document.getElementById("prompt");
-        if (!ta) return;
-        ta.addEventListener("keydown", function (e) {
-          if ((e.ctrlKey || e.metaKey) && e.key === "Enter") return;
-          if (e.key !== "Enter" || e.shiftKey) return;
-          e.preventDefault();
-          var btn = ta.closest("form") && ta.closest("form").querySelector('[type="submit"]:not(.disconnect)');
-          if (btn && !btn.disabled && !ta.disabled) ta.closest("form").submit();
-        });
-        var th = document.getElementById("thread");
-        if (th) th.scrollTop = th.scrollHeight;
+        var composer = document.getElementById("composer");
+        var chatShell = document.getElementById("chat-shell");
+        var submitBtn = planForm ? planForm.querySelector('button[type="submit"]') : null;
+
+        function showPlanPendingUi() {
+          var th = document.getElementById("thread");
+          if (!th) return;
+
+          var row = document.createElement("div");
+          row.className = "chat-row assistant thinking-row";
+          row.setAttribute("role", "status");
+          row.setAttribute("aria-live", "polite");
+          row.setAttribute("aria-busy", "true");
+          row.innerHTML =
+            '<img class="avatar" src="/assistant.svg" alt="" width="44" height="44" decoding="async" />' +
+            '<div class="bubble assistant-bubble thinking-bubble">' +
+            '<span class="thinking-line">' +
+            '<span class="thinking-title">Thinking</span>' +
+            '<span class="thinking-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>' +
+            "</span>" +
+            '<span class="muted sm" style="display:block;margin-top:6px">Waiting for a response.</span>' +
+            "</div>";
+          th.appendChild(row);
+
+          if (composer) composer.classList.add("is-busy");
+          if (chatShell) chatShell.setAttribute("aria-busy", "true");
+
+          /* Do not use disabled on textarea — successful controls only; empty POST otherwise. */
+          if (ta && planForm.contains(ta)) {
+            ta.readOnly = true;
+            ta.setAttribute("aria-readonly", "true");
+          }
+          if (submitBtn) submitBtn.disabled = true;
+
+          th.scrollTop = th.scrollHeight;
+        }
+
+        if (planForm) {
+          planForm.addEventListener("submit", function () {
+            if (planForm.dataset.sent === "1") return;
+            planForm.dataset.sent = "1";
+            showPlanPendingUi();
+          });
+        }
+
+        if (ta && planForm) {
+          ta.addEventListener("keydown", function (e) {
+            if ((e.ctrlKey || e.metaKey) && e.key === "Enter") return;
+            if (e.key !== "Enter" || e.shiftKey) return;
+            e.preventDefault();
+            if (!submitBtn || submitBtn.disabled || ta.disabled || planForm.dataset.sent === "1") return;
+            if (typeof planForm.requestSubmit === "function") {
+              planForm.requestSubmit(submitBtn);
+              return;
+            }
+            planForm.submit();
+          });
+        }
+
+        var thScroll = document.getElementById("thread");
+        if (thScroll) thScroll.scrollTop = thScroll.scrollHeight;
       })();
     </script>
   </body>

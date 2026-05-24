@@ -5,6 +5,13 @@ const { scheduleTasks } = require("./scheduleTasks");
 const { hasConflict } = require("./calendar");
 const { pendingPlanItemSchema } = require("./planSchema");
 const { googleAuthNeedsReconnect } = require("./googleErrors");
+const { buildPreferenceOverlapNote } = require("./plannerSchedulingNote");
+
+function prependCalendarNote(note, assistantText) {
+  const trimmed = typeof note === "string" ? note.trim() : "";
+  if (!trimmed) return assistantText;
+  return `${trimmed}\n\n${assistantText}`;
+}
 
 function totalFreeMinutes(freeSlots) {
   let m = 0;
@@ -64,6 +71,19 @@ async function runPlanningPipeline(auth, env, userMessage) {
       };
     }
 
+    let prefOverlapNote = "";
+    try {
+      prefOverlapNote = await buildPreferenceOverlapNote(auth, {
+        tasks,
+        mergedBusy,
+        timeMin,
+        timeMax,
+        timeZone,
+      });
+    } catch {
+      prefOverlapNote = "";
+    }
+
     const draft = scheduleTasks(tasks, free, {
       timeZone,
       gridMinutes: 15,
@@ -91,7 +111,10 @@ async function runPlanningPipeline(auth, env, userMessage) {
         : "";
       return {
         ok: false,
-        assistantText: `Draft times still conflict somewhere on your Calendar.${suffix} Try narrower tasks.`,
+        assistantText: prependCalendarNote(
+          prefOverlapNote,
+          `Draft times still conflict somewhere on your Calendar.${suffix} Try narrower tasks.`
+        ),
       };
     }
 
@@ -111,13 +134,16 @@ async function runPlanningPipeline(auth, env, userMessage) {
     const taskListPreview = verified
       .slice(0, 6)
       .map((s) =>
-        `- ${DateTime.fromISO(s.startISO).setZone(timeZone).toFormat("ccc h:mm")}→${DateTime.fromISO(s.endISO).setZone(timeZone).toFormat("h:mm")}: ${s.title}`
+        `- ${DateTime.fromISO(s.startISO).setZone(timeZone).toFormat("ccc h:mm a")}→${DateTime.fromISO(s.endISO).setZone(timeZone).toFormat("h:mm a")}: ${s.title}`
       )
       .join("\n");
 
     const tail = verified.length > 6 ? `\n⋯ +${verified.length - 6} more in preview.` : "";
 
-    const assistantText = [fitNote, "Draft slots (needs Confirm)", taskListPreview + tail].filter(Boolean).join("\n\n");
+    const assistantText = prependCalendarNote(
+      prefOverlapNote,
+      [fitNote, "Draft slots (needs Confirm)", taskListPreview + tail].filter(Boolean).join("\n\n")
+    );
 
     return { ok: true, items, assistantText, previewRows };
   } catch (err) {

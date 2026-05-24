@@ -22,6 +22,30 @@ function toGoogleDateTime(iso, timeZone) {
   };
 }
 
+async function listPrimaryEventsInWindow(auth, { timeMin, timeMax }) {
+  const cal = calendarClient(auth);
+  /** @type {import("googleapis").calendar_v3.Schema$Event[]} */
+  const all = [];
+  let pageToken = /** @type {string | undefined} */ (undefined);
+
+  do {
+    // eslint-disable-next-line no-await-in-loop — Google pagination API
+    const resp = await cal.events.list({
+      calendarId: "primary",
+      timeMin,
+      timeMax,
+      singleEvents: true,
+      orderBy: "startTime",
+      maxResults: 250,
+      pageToken,
+    });
+    all.push(...(resp.data.items ?? []));
+    pageToken = resp.data.nextPageToken ?? undefined;
+  } while (pageToken);
+
+  return all;
+}
+
 async function hasConflict(auth, { startISO, endISO, timeZone }) {
   const cal = calendarClient(auth);
   const resp = await cal.freebusy.query({
@@ -52,5 +76,5 @@ async function createEvent(auth, { summary, description, startISO, endISO, timeZ
   return resp.data;
 }
 
-module.exports = { hasConflict, createEvent };
+module.exports = { hasConflict, createEvent, listPrimaryEventsInWindow };
 
