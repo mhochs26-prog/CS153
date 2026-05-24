@@ -1,6 +1,6 @@
-# Web UI → Google Calendar (starter)
+# AI Product Planner Agent
 
-This project is a starter web app that:
+This project is a web app that:
 
 - lets a browser user connect Google Calendar via OAuth
 - user prompts agent to plan/break down events into segments
@@ -9,12 +9,14 @@ This project is a starter web app that:
 ## Visit Here:
 https://cs153.onrender.com
 
-## Run
+test with cs153testagent@gmail.com
+Thisisforcs153!
+
+## Local Run
 IMPORTANT: cloned project will not work, no .env
 
 - npm install
 - npm run dev
-
 
 Then open:
 
