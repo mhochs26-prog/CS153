@@ -26,3 +26,6 @@ I want to build a website in the morning
 
 <img width="697" height="1013" alt="image" src="https://github.com/user-attachments/assets/577029fe-210c-44f2-8b48-41d523552743" />
 
+## AI Usage
+Used Cursor Opus to scope out the website and frontend.
+
